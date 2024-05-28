@@ -6,9 +6,9 @@ import {ReasonPhrases, StatusCodes} from "http-status-codes";
 const makeRouter = (authService, userService) => {
     const userRouter = express.Router();
 
-    userRouter.get("/user", authService.isTeacher, async (req, res) => {
+    userRouter.get("/user", authService.isTeacher, userService.getUserList, async (req, res) => {
         try {
-            const users = await userService.getUserList();
+            const users = req.userList;
 
             return res.status(StatusCodes.OK).send(users);
         } catch (error) {
@@ -16,81 +16,39 @@ const makeRouter = (authService, userService) => {
         }
     });
 
-    userRouter.get("/user/:userId", authService.isTeacher, async (req, res) => {
+    userRouter.get("/user/:userId", authService.isTeacher, userService.getUserById, async (req, res) => {
         try {
-            const userId = req.params.userId
-            const user = await userService.getUserById(userId);
+            const user = req.user;
+
+            return res.status(StatusCodes.OK).send(user);
+        } catch (error) {
+            return res.status(StatusCodes.BAD_REQUEST).send({ error: error.message });
+        }
+    });
+
+    userRouter.patch("/user/:userId", authService.isAdmin, userService.updateUser, async (req, res) => {
+        try {
+            const user = req.user;
+
+            return res.status(StatusCodes.OK).send(user);
+        } catch (error) {
+            return res.status(StatusCodes.BAD_REQUEST).send({ error: error.message });
+        }
+    });
+
+    userRouter.delete("/user/:userId", authService.isTeacher, userService.getUserById, userService.deleteUserById, async (req, res) => {
+        try {
             
-            if (!user) {
-                return res
-                    .status(StatusCodes.NOT_FOUND)
-                    .send({ error: ReasonPhrases.NOT_FOUND });
-            }
-
-            return res.status(StatusCodes.OK).send(user);
-        } catch (error) {
-            return res.status(StatusCodes.BAD_REQUEST).send({ error: error.message });
-        }
-    });
-
-    userRouter.patch("/user/:userId", authService.isAdmin, async (req, res) => {
-        try {
-            const userId = req.params.userId;
-            const updates = req.body;
-            const user = await userService.updateUser(userId, updates);
-
-            // TODO: Need to catch errors
-            console.log(user);
-
-            return res.status(StatusCodes.OK).send(user);
-        } catch (error) {
-            return res.status(StatusCodes.BAD_REQUEST).send({ error: error.message });
-        }
-    });
-
-    userRouter.delete("/user/:userId", authService.isTeacher, async (req, res) => {
-        const userId = req.params.userId
-
-        try {
-            const user = await userService.deleteUserById(userId);
-
-            // TODO: Need to catch errors
-            console.log(user);
-
-            // TODO: Move this to middleware
-            if (req.user.userType !== "Admin" && req.user._id !== userId) {
-                return res
-                    .status(StatusCodes.FORBIDDEN)
-                    .send( { error: ReasonPhrases.FORBIDDEN });
-            }
-
-            // TODO: Test deleting course in user-service, then remove this line
-            // await Course.deleteMany({teachers: {$elemMatch: {_id: userId}}});
-
+            
             return res.sendStatus(StatusCodes.OK);
         } catch (error) {
             return res.status(StatusCodes.BAD_REQUEST).send({ error: error.message });
         }
     });
 
-    userRouter.post("/user", authService.isAdmin, async (req, res) => {
-        try{
-            // TODO: Move this to service
-            const { username, password } = req.body;
-
-            if (!await this.checkUniqueUsername(username)){
-                return res.status(StatusCodes.CONFLICT).send({error: "Username not unique"});
-            }
-
-            if (password.length < 8){
-                return res.status(StatusCodes.NOT_ACCEPTABLE).send({error: "Password format not acceptable."});
-            }
-            
+    userRouter.post("/user", authService.isAdmin, userService.checkUniqueUsername, userService.validator, async (req, res) => {
+        try {
             const newUser = await userService.createUser(req.body);
-
-            if (!newUser) {
-                return res.status(StatusCodes.UNPROCESSABLE_ENTITY).send({error: "Incorrect format in request payload."});
-            }
 
             return res.status(StatusCodes.CREATED).send(newUser);
         } catch (error){

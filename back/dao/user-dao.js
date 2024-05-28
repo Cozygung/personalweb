@@ -4,33 +4,34 @@ class UserDao {
     constructor(userModel) {
         this.#userModel = userModel;
     }
-    checkUniqueUsername(username) {
-        const alreadyExists = this.#userModel.findOne({ username: username });
+    async checkUniqueUsername(username) {
+        const alreadyExists = await this.#userModel.findOne({ username: username })
+        console.log(alreadyExists)
 
         return !alreadyExists
     };
 
-    createUser(user) {
+    async createUser(user) {
         const userInstance = new this.#userModel(user);
-        userInstance.save();
+        await userInstance.save();
 
         return userInstance
     };
 
-    getUserById(userId) {
-        return this.#userModel.findById(userId);
+    async getUserById(userId) {
+        return await this.#userModel.findById(userId);
     };
 
-    getUserList(queryFilter) {
-        return this.#userModel.find(queryFilter)
+    async getUserList(queryFilter) {
+        return await this.#userModel.find(queryFilter)
     };
 
-    updateUser(userId, userUpdates) {
-        return this.#userModel.findByIdAndUpdate(userId, userUpdates, { new: true })
+    async updateUser(userId, userUpdates) {
+        return await this.#userModel.findByIdAndUpdate(userId, userUpdates, { new: true })
     };
 
-    deleteUserById(userId) {
-        return this.#userModel.findByIdAndDelete(userId)
+    async deleteUserById(userId) {
+        return await this.#userModel.findByIdAndDelete(userId)
     }
 }
 

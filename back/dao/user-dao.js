@@ -1,3 +1,5 @@
+import {query} from "express";
+
 class UserDao {
     #userModel; // Private Field (Can't be accessed or seen from outside)
 
@@ -5,10 +7,9 @@ class UserDao {
         this.#userModel = userModel;
     }
     async checkUniqueUsername(username) {
-        const alreadyExists = await this.#userModel.findOne({ username: username })
-        console.log(alreadyExists)
+        const isUnique = !await this.#userModel.findOne({ username: username })
 
-        return !alreadyExists
+        return isUnique
     };
 
     async createUser(user) {
@@ -19,8 +20,12 @@ class UserDao {
     };
 
     async getUserById(userId) {
-        return await this.#userModel.findById(userId);
+        return await this.#userModel.findById(userId)
     };
+    
+    async getUser(queryFilter) {
+        return await this.#userModel.findOne(queryFilter)
+    }
 
     async getUserList(queryFilter) {
         return await this.#userModel.find(queryFilter)

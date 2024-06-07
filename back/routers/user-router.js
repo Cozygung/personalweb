@@ -1,81 +1,105 @@
 import express from "express";
-import jwt from "jsonwebtoken";
 import {ReasonPhrases, StatusCodes} from "http-status-codes";
+import bcrypt from "bcrypt";
+import { param, body, validationResult } from "express-validator";
 
 // TODO: Check if you need return statements or if you can just res.send()
-const makeRouter = (authService, userService) => {
+const makeRouter = (csrfProtection, authService, userService, userValidator) => {
     const userRouter = express.Router();
 
-    userRouter.get("/user", authService.isTeacher, userService.getUserList, async (req, res) => {
+    userRouter.get("/users", authService.isTeacher, async (req, res) => {
         try {
-            const users = req.userList;
+            const users = await userService.getUserList(req.body);
 
             return res.status(StatusCodes.OK).send(users);
         } catch (error) {
-            return res.status(StatusCodes.BAD_REQUEST).send({ error: error.message });
+            return res.status(StatusCodes.INTERNAL_SERVER_ERROR).send({ error: error.message });
         }
     });
 
-    userRouter.get("/user/:userId", authService.isTeacher, userService.getUserById, async (req, res) => {
+    userRouter.get("/user/:userId", authService.isTeacher, async (req, res) => {
         try {
-            const user = req.user;
+            const user = await userService.getUserById(req.params.userId);
 
             return res.status(StatusCodes.OK).send(user);
         } catch (error) {
-            return res.status(StatusCodes.BAD_REQUEST).send({ error: error.message });
+            return res.status(StatusCodes.INTERNAL_SERVER_ERROR).send({ error: error.message });
         }
     });
 
-    userRouter.patch("/user/:userId", authService.isAdmin, userService.updateUser, async (req, res) => {
+    userRouter.patch("/user/:userId", authService.isAdmin, async (req, res) => {
         try {
-            const user = req.user;
+            const user = userService.updateUser(req.params.userId, req.body);
 
             return res.status(StatusCodes.OK).send(user);
         } catch (error) {
-            return res.status(StatusCodes.BAD_REQUEST).send({ error: error.message });
+            return res.status(StatusCodes.INTERNAL_SERVER_ERROR).send({ error: error.message });
         }
     });
 
-    userRouter.delete("/user/:userId", authService.isTeacher, userService.getUserById, userService.deleteUserById, async (req, res) => {
+    userRouter.delete("/user/:userId", authService.isTeacher, async (req, res) => {
         try {
-            
-            
+            // This should return a document if it succeeded
+            const doc = userService.deleteUserById(req.params.userId);
+            if (!doc.j) {
+                return res.sendStatus(StatusCodes.NOT_FOUND);
+            }
             return res.sendStatus(StatusCodes.OK);
         } catch (error) {
-            return res.status(StatusCodes.BAD_REQUEST).send({ error: error.message });
+            return res.status(StatusCodes.INTERNAL_SERVER_ERROR).send({ error: error.message });
         }
     });
 
-    userRouter.post("/user", authService.isAdmin, userService.checkUniqueUsername, userService.validator, async (req, res) => {
+    userRouter.post("/user", authService.isAdmin, userValidator.updateUserValidatorChain, async (req, res, next) => {
         try {
             const newUser = await userService.createUser(req.body);
 
             return res.status(StatusCodes.CREATED).send(newUser);
         } catch (error){
-            console.log(error);
-            res.status(StatusCodes.INTERNAL_SERVER_ERROR).send({ error: error });
+            console.log(error)
+            return res.status(StatusCodes.INTERNAL_SERVER_ERROR).send({ error: error.message });
         }
     });
 
+    // TODO: Need to implement Rate Limiter for Login
     userRouter.post("/login", async (req, res) => {
-        // TODO: There must be another better way to login
-        const { username, password } = req.body;
-        const user = await userService.getUserById({ username: username.toString() });
+        try {
+            console.log("test");
+            const existingUser = await userService.getUser({ username: req.body.username });
 
-        if (user && password === user.password) {
-            console.log(user.toObject());
-            const accessToken = jwt.sign(
-                user.toObject(),
-                process.env.ACCESS_TOKEN_SECRET,
-                { expiresIn: "10h" }
-            );
-            return res
-                .status(StatusCodes.OK)
-                .json({ message: "Login successful", token: accessToken, user: user });
-        } else {
-            return res.status(StatusCodes.UNAUTHORIZED).json({ message: "Login failed" });
+            if (await bcrypt.compare(req.body.password, existingUser.password)) {
+                // TODO: createToken should only create Refresh Token if it expired.
+                // TODO: It should find the re-token and create the access token. 
+                const {accessToken, refreshToken} = authService.createToken(existingUser);
+                return res
+                    .cookie('refreshToken', refreshToken, {
+                        httpOnly: true,
+                        secure: true,
+                        signed: true,
+                        sameSite: 'strict',
+                    })
+                    .status(StatusCodes.OK)
+                    .json({ accessToken: accessToken });
+            } else {
+                return res.sendStatus(StatusCodes.UNAUTHORIZED);
+            }
+
+        } catch (error) {
+            return res.status(StatusCodes.INTERNAL_SERVER_ERROR).send({ error: error.message });
         }
     });
+    
+    userRouter.get("/form", csrfProtection, authService.isStudent, async (req, res, nex) => {
+        res.send({ csrfToken: req.csrfToken() });
+    })
+    
+    userRouter.post("/token", csrfProtection, authService.isStudent, authService.refreshToken); 
+    
+    userRouter.delete("/logout", async (req, res, next) => {
+        // TODO: Remove Refresh Token from database
+        
+        res.sendStatus(StatusCodes.OK)
+    })
     
     return userRouter;
 }

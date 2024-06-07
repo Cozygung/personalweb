@@ -1,31 +1,30 @@
-// import validator from 'validator';
-// import bcrypt from 'bcryptjs'; // Password encryption
-
+// TODO: Store a list of Valid IP Addresses
 const makeModel = (ODM) => {
     const userSchema = new ODM.Schema({
         username: {
             type: String,
             unique: true,
-            required: true
+            required: true,
+            maxlength: 16,
+            trim: true,
         },
         firstName: {
             type: String,
             required: true,
+            maxlength: 24,
+            trim: true,
         },
         lastName: {
             type: String,
             required: true,
+            maxlength: 24,
+            trim: true,
         },
         password: {
             type: String,
             required: true,
             minlength: 8,
             trim: true,
-            validator(value) {
-                if (value.toLowerCase().includes('password')) {
-                    throw new Error("Password cannot contain 'password'.");
-                }
-            }
         },
         userType: {
             type: String,

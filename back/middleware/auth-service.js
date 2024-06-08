@@ -1,9 +1,16 @@
 import jwt from "jsonwebtoken";
 import { StatusCodes } from "http-status-codes";
 import bcrypt from "bcrypt";
+import TokenExpiredError from "jsonwebtoken/lib/TokenExpiredError.js";
 
 class AuthService {
     // TODO: Need to be able to delete expired jwt tokens
+    #tokenDAO;
+    
+    constructor(tokenDAO) {
+        this.#tokenDAO = tokenDAO;
+    }
+    
     authenticateToken = async (req, res, next) => {
         if (req.headers.authorization) {
             const [bearerToken, token] = req.headers.authorization.split(" ");
@@ -20,6 +27,10 @@ class AuthService {
                 }).then(() => {
                         next();
                 }).catch((err) => {
+                    if (err instanceof TokenExpiredError) {
+                        return res.status(err.status).send({ error: err.message });
+                    }
+                    
                     return res.status(StatusCodes.FORBIDDEN).send({ error: "User does not have access to this command!" });
                 });
             }
@@ -66,36 +77,51 @@ class AuthService {
     };
     
     
-    createToken = (user) => {
-        const accessToken = jwt.sign({ 
-                _id: user._id,
+    createToken = async (user) => {
+        const accessToken = await jwt.sign({ 
                 username: user.username, 
                 userType: user.userType
-            
             },
             process.env.JWT_ACCESS_TOKEN_SECRET,{
                 expiresIn: parseInt(process.env.JWT_ACCESS_TIME, 10),
                 issuer: process.env.JWT_ISSUER,
             }
         );
-        const refreshToken = jwt.sign({
-                _id: user._id,
+        // Check if refresh token already exists for the user
+        const existingRefreshToken = await this.#tokenDAO.getRefreshTokenByUsername(user.username);
+        if (!existingRefreshToken) {
+            const refreshToken = await jwt.sign({
+                    username: user.username,
+                    userType: user.userType
+                },
+                process.env.JWT_REFRESH_TOKEN_SECRET,
+                {
+                    expiresIn: parseInt(process.env.JWT_REFRESH_TIME, 10),
+                    issuer: process.env.JWT_ISSUER,
+                }
+            );
+
+            const decoded = await jwt.decode(refreshToken);
+            const exp = new Date(decoded.exp * 1000)
+
+            const token = {
+                refreshToken: refreshToken,
                 username: user.username,
-                userType: user.userType
-            },
-            process.env.JWT_REFRESH_TOKEN_SECRET,
-            {
-                expiresIn: parseInt(process.env.JWT_REFRESH_TIME, 10),
-                issuer: process.env.JWT_ISSUER,
+                expireDate: exp
             }
-        );
-        return { accessToken, refreshToken }
+            await this.#tokenDAO.activateRefreshToken(token)
+
+            return { accessToken, refreshToken }
+        }
+        
+        return { accessToken, existingRefreshToken }
     }
 
-    refreshToken = async (req, res, next) => {
+    refreshAccessToken = async (req, res, next) => {
+        console.log("refreshing")
         const refreshToken = req.signedCookies.refreshToken;
         if (!refreshToken) return res.sendStatus(StatusCodes.UNAUTHORIZED);
-        if (!refreshToken.includes(refreshToken)) return res.sendStatus(StatusCodes.FORBIDDEN);
+        if (!this.#tokenDAO.isValidRefreshToken) return res.sendStatus(StatusCodes.FORBIDDEN);
         return new Promise((resolve, reject) => {
             jwt.verify(refreshToken, process.env.JWT_REFRESH_TOKEN_SECRET, {
                 expiresIn: parseInt(process.env.JWT_REFRESH_TIME, 10),
@@ -107,8 +133,8 @@ class AuthService {
                 resolve(user);
             });
         }).then((user) => {
+            // We don't want to rotate refresh tokens otherwise other concurrent devices will be signed out
             const accessToken = jwt.sign({
-                    _id: user._id,
                     username: user.username,
                     userType: user.userType
                 },
@@ -119,6 +145,15 @@ class AuthService {
         }).catch((err) => {
             return res.status(StatusCodes.FORBIDDEN).send({ error: "User does not have access to this command!" });
         });
+    }
+    
+    revokeRefreshToken = async (refreshToken)  => {
+        return await this.#tokenDAO.revokeRefreshToken({ refreshToken: refreshToken })
+    }
+    
+    removeExpiredTokens = async () => {
+        const now = new Date();
+        await this.#tokenDAO.revokeAllRefreshTokens({ expireDate: { $lt: now }});
     }
 }
 

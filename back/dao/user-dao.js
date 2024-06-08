@@ -1,5 +1,3 @@
-import {query} from "express";
-
 class UserDao {
     #userModel; // Private Field (Can't be accessed or seen from outside)
 

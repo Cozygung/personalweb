@@ -1,7 +1,6 @@
 import express from "express";
 import {ReasonPhrases, StatusCodes} from "http-status-codes";
 import bcrypt from "bcrypt";
-import { param, body, validationResult } from "express-validator";
 
 // TODO: Check if you need return statements or if you can just res.send()
 const makeRouter = (csrfProtection, authService, userService, userValidator) => {
@@ -68,9 +67,8 @@ const makeRouter = (csrfProtection, authService, userService, userValidator) => 
             const existingUser = await userService.getUser({ username: req.body.username });
 
             if (await bcrypt.compare(req.body.password, existingUser.password)) {
-                // TODO: createToken should only create Refresh Token if it expired.
-                // TODO: It should find the re-token and create the access token. 
-                const {accessToken, refreshToken} = authService.createToken(existingUser);
+                // TODO: createToken should replace Refresh Token if it already exists.
+                const {accessToken, refreshToken} = await authService.createToken(existingUser);
                 return res
                     .cookie('refreshToken', refreshToken, {
                         httpOnly: true,
@@ -93,12 +91,19 @@ const makeRouter = (csrfProtection, authService, userService, userValidator) => 
         res.send({ csrfToken: req.csrfToken() });
     })
     
-    userRouter.post("/token", csrfProtection, authService.isStudent, authService.refreshToken); 
+    userRouter.post("/token", csrfProtection, authService.isStudent, authService.refreshAccessToken); 
     
-    userRouter.delete("/logout", async (req, res, next) => {
+    userRouter.post("/logout", async (req, res, next) => {
         // TODO: Remove Refresh Token from database
-        
-        res.sendStatus(StatusCodes.OK)
+        try {
+            const revokedToken = await authService.revokeRefreshToken(req.signedCookies.refreshToken)
+            res.clearCookie("_csrf")
+            res.clearCookie("refreshToken")
+
+            return res.status(StatusCodes.OK).send({ revokedToken: revokedToken });
+        } catch (error) {
+            return res.status(StatusCodes.INTERNAL_SERVER_ERROR).send({ error: error.message });
+        }
     })
     
     return userRouter;

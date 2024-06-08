@@ -1,4 +1,3 @@
-// TODO: Store a list of Valid IP Addresses
 const makeModel = (ODM) => {
     const userSchema = new ODM.Schema({
         username: {

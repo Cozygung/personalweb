@@ -1,10 +1,11 @@
 import jwt from "jsonwebtoken";
-import { StatusCodes } from "http-status-codes";
-import bcrypt from "bcrypt";
+import crypto from "crypto";
+import {ReasonPhrases, StatusCodes} from "http-status-codes";
 import TokenExpiredError from "jsonwebtoken/lib/TokenExpiredError.js";
+import {ServerError} from "../errors/server-error.js";
 
 class AuthService {
-    // TODO: Need to be able to delete expired jwt tokens
+    // TODO: Need to implement blacklisting tokens created before certain date
     #tokenDAO;
     
     constructor(tokenDAO) {
@@ -13,30 +14,32 @@ class AuthService {
     
     authenticateToken = async (req, res, next) => {
         if (req.headers.authorization) {
-            const [bearerToken, token] = req.headers.authorization.split(" ");
-            console.log(bearerToken);
+            const [bearerToken, encryptedToken] = req.headers.authorization.split(" ");
             if (bearerToken === "Bearer") {
-                return new Promise((resolve, reject) => {
-                    jwt.verify(token, process.env.JWT_ACCESS_TOKEN_SECRET, (err, user) => {
-                        if (err) {
-                            return reject(err);
-                        }
-                        req.user = user;
-                        resolve();
-                    });
-                }).then(() => {
-                        next();
+                const accessToken = this.decryptToken(encryptedToken);
+                const fingerprint = req.signedCookies.accessTokenFingerprint;
+                const SECRET_KEY = process.env.JWT_ACCESS_TOKEN_SECRET;
+                const EXPIRE_TIME = parseInt(process.env.JWT_ACCESS_TOKEN_EXPIRE_TIME, 10);
+                
+                // Verify the token and throw TokenExpiredError if expired || This is easier to read than Try / Catch
+                return await this.jwtVerifyToken(accessToken, fingerprint, SECRET_KEY, EXPIRE_TIME).then((decoded) => {
+                    // TODO: Might need to fetch the entire user object from DB
+                    const {username, userType} = decoded;
+                    req.user = {username, userType};
+                    
+                    return next();
                 }).catch((err) => {
-                    if (err instanceof TokenExpiredError) {
-                        return res.status(err.status).send({ error: err.message });
+                    if (err.name === 'TokenExpiredError') {
+                        console.log("working")
+                        return res.status(StatusCodes.UNAUTHORIZED).send({ error: 'TokenExpiredError', message: err.message });
                     }
                     
-                    return res.status(StatusCodes.FORBIDDEN).send({ error: "User does not have access to this command!" });
+                    return res.sendStatus(StatusCodes.FORBIDDEN).send({ error: 'InvalidTokenError', message: "Invalid bearer token" });
                 });
             }
-            return res.status(StatusCodes.UNAUTHORIZED).send({ error: "Invalid bearer token" });
+            return res.status(StatusCodes.FORBIDDEN).send({ error: 'InvalidTokenError', message: "Invalid bearer token" });
         }
-        return res.sendStatus(StatusCodes.BAD_REQUEST).send({ error: "Authorization header is not present" });
+        return res.status(StatusCodes.UNAUTHORIZED).send({ error: 'MissingTokenError', message: "Authorization header is not present" });
     };
 
     isStudent = async (req, res, next) => {
@@ -75,85 +78,149 @@ class AuthService {
             }
         });
     };
-    
-    
-    createToken = async (user) => {
-        const accessToken = await jwt.sign({ 
-                username: user.username, 
-                userType: user.userType
-            },
-            process.env.JWT_ACCESS_TOKEN_SECRET,{
-                expiresIn: parseInt(process.env.JWT_ACCESS_TIME, 10),
-                issuer: process.env.JWT_ISSUER,
-            }
-        );
-        // Check if refresh token already exists for the user
-        const existingRefreshToken = await this.#tokenDAO.getRefreshTokenByUsername(user.username);
-        if (!existingRefreshToken) {
-            const refreshToken = await jwt.sign({
-                    username: user.username,
-                    userType: user.userType
-                },
-                process.env.JWT_REFRESH_TOKEN_SECRET,
-                {
-                    expiresIn: parseInt(process.env.JWT_REFRESH_TIME, 10),
-                    issuer: process.env.JWT_ISSUER,
-                }
-            );
 
-            const decoded = await jwt.decode(refreshToken);
-            const exp = new Date(decoded.exp * 1000)
+    // GDPR Data Regulatory requirements
+    encryptToken = (token) => {
+        const iv = crypto.randomBytes(12); // Initialization vector (12 bytes for GCM)
+        const key = Buffer.from(process.env.JWT_TOKEN_CIPHER_SECRET, 'hex');
+        const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
 
-            const token = {
-                refreshToken: refreshToken,
-                username: user.username,
-                expireDate: exp
-            }
-            await this.#tokenDAO.activateRefreshToken(token)
+        let encryptedToken = cipher.update(token, 'utf8', 'hex');
+        encryptedToken += cipher.final('hex');
+        const authTag = cipher.getAuthTag().toString('hex');
 
-            return { accessToken, refreshToken }
-        }
-        
-        return { accessToken, existingRefreshToken }
+        return `${iv.toString('hex')}:${encryptedToken}:${authTag}`;
     }
 
-    refreshAccessToken = async (req, res, next) => {
-        console.log("refreshing")
-        const refreshToken = req.signedCookies.refreshToken;
-        if (!refreshToken) return res.sendStatus(StatusCodes.UNAUTHORIZED);
-        if (!this.#tokenDAO.isValidRefreshToken) return res.sendStatus(StatusCodes.FORBIDDEN);
+    decryptToken = (encryptedToken) => {
+        const [ivHex, encryptedHex, authTagHex] = encryptedToken.split(':');
+        const iv = Buffer.from(ivHex, 'hex');
+        const encryptedData = Buffer.from(encryptedHex, 'hex');
+        const authTag = Buffer.from(authTagHex, 'hex');
+
+        const key = Buffer.from(process.env.JWT_TOKEN_CIPHER_SECRET, 'hex');
+        const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+        decipher.setAuthTag(authTag);
+
+        let decryptedToken = decipher.update(encryptedData, 'hex', 'utf8');
+        decryptedToken += decipher.final('utf8');
+
+        return decryptedToken;
+    }
+    
+    jwtVerifyToken = async(token, fingerprint, secretKey, expireDate) => {
         return new Promise((resolve, reject) => {
-            jwt.verify(refreshToken, process.env.JWT_REFRESH_TOKEN_SECRET, {
-                expiresIn: parseInt(process.env.JWT_REFRESH_TIME, 10),
+            jwt.verify(token, secretKey, {
+                algorithms: ['HS256'],
+                expiresIn: expireDate,
                 issuer: process.env.JWT_ISSUER,
-            }, (err, user) => {
+            }, (err, decoded) => {
                 if (err) {
                     return reject(err);
                 }
-                resolve(user);
+                if (typeof fingerprint === undefined || decoded.fingerprint !== fingerprint) {
+                    const exp = new Date(decoded.exp * 1000).toISOString();
+                    const tokenExpiredError = new TokenExpiredError("jwt expired", exp);
+                    tokenExpiredError.name = 'TokenExpiredError'
+                    
+                    return reject(tokenExpiredError)
+                }
+                resolve(decoded);
             });
-        }).then((user) => {
+        })
+    }
+
+    jwtSignToken = async (user, fingerprint, secretKey, expireDate, issuer) => {
+        return await jwt.sign({
+                username: user.username,
+                userType: user.userType,
+                fingerprint: fingerprint,
+            },
+            secretKey,{
+                algorithm: 'HS256',
+                expiresIn: parseInt(expireDate, 10),
+                issuer: issuer,
+            }
+        );
+    }
+
+    // HS256 algorithm to prevent 'NONE' hashing algorithm attack
+    createToken = async (user, createRefreshToken= false) => {
+        const SECRET_KEY = createRefreshToken ? process.env.JWT_REFRESH_TOKEN_SECRET : process.env.JWT_ACCESS_TOKEN_SECRET;
+        const EXPIRE_TIME = createRefreshToken ? process.env.JWT_REFRESH_TOKEN_EXPIRE_TIME : process.env.JWT_ACCESS_TOKEN_EXPIRE_TIME;
+        
+        if (createRefreshToken) {
+            // Check if refresh token already exists for the user
+            const existingEncryptedRefreshToken = await this.#tokenDAO.getRefreshTokenByUsername(user.username);
+            if (existingEncryptedRefreshToken) {
+                const token = this.decryptToken(existingEncryptedRefreshToken.refreshToken);
+                const decoded = await jwt.decode(token, SECRET_KEY);
+                const expiryDate = new Date(decoded.exp * 1000);
+                const currentDate = new Date();
+                
+                // If token is expired remove it from the DB and create a new token
+                if (expiryDate < currentDate) {
+                    await this.#tokenDAO.deleteRefreshToken(existingEncryptedRefreshToken)
+                } else {
+                    return { token: existingEncryptedRefreshToken.refreshToken, fingerprint: decoded.fingerprint }
+                }
+            }
+        }
+        const userFingerprint = crypto.randomBytes(50).toString('hex');
+        const token = await this.jwtSignToken(user, userFingerprint, SECRET_KEY, parseInt(EXPIRE_TIME, 10), process.env.JWT_ISSUER);
+        const encryptedToken = this.encryptToken(token);
+        
+        if (createRefreshToken) {
+            const decoded = await jwt.decode(token, SECRET_KEY);
+            const expireDate = new Date(decoded.exp * 1000)
+
+            const refreshTokenObject = {
+                refreshToken: encryptedToken,
+                username: user.username,
+                expireDate: expireDate
+            }
+            await this.#tokenDAO.addRefreshToken(refreshTokenObject)
+        }
+        
+        return {token: encryptedToken, fingerprint: userFingerprint}
+    }
+
+    refreshAccessToken = async (encryptedRefreshToken, fingerprint) => {
+        console.log("refreshing")
+        const refreshToken = this.decryptToken(encryptedRefreshToken);
+        const SECRET_KEY = process.env.JWT_REFRESH_TOKEN_SECRET;
+        const EXPIRE_TIME = parseInt(process.env.JWT_REFRESH_TOKEN_EXPIRE_TIME, 10);
+        
+        // Check if refreshToken exists and is valid
+        if (!encryptedRefreshToken) {
+            // TODO: Create an Error object for Tokens
+            const error = new ServerError(StatusCodes.UNAUTHORIZED, 'Missing Refresh Token') 
+            error.name = 'MissingTokenError';
+            throw error
+        }
+        if (!await this.#tokenDAO.isValidRefreshToken(encryptedRefreshToken)) {
+            const error = new ServerError(StatusCodes.FORBIDDEN, 'Invalid Refresh Token')
+            error.name = 'InvalidTokenError';
+            throw error
+        }
+        
+        return await this.jwtVerifyToken(refreshToken, fingerprint, SECRET_KEY, EXPIRE_TIME).then(async (decoded) => {
             // We don't want to rotate refresh tokens otherwise other concurrent devices will be signed out
-            const accessToken = jwt.sign({
-                    username: user.username,
-                    userType: user.userType
-                },
-                process.env.JWT_ACCESS_TOKEN_SECRET,
-                { expiresIn: parseInt(process.env.JWT_ACCESS_TIME, 10) }
-            );
-            return res.status(StatusCodes.OK).json({ accessToken: accessToken })
-        }).catch((err) => {
-            return res.status(StatusCodes.FORBIDDEN).send({ error: "User does not have access to this command!" });
+            const {username, userType} = decoded;
+            // TODO: Might need to fetch the entire user object from DB
+            const user = {username, userType};
+
+            return await this.createToken(user);
         });
     }
     
-    revokeRefreshToken = async (refreshToken)  => {
-        return await this.#tokenDAO.revokeRefreshToken({ refreshToken: refreshToken })
+    deleteRefreshToken = async (refreshToken)  => {
+        return await this.#tokenDAO.deleteRefreshToken({ refreshToken: refreshToken })
     }
     
-    removeExpiredTokens = async () => {
+    deleteAllExpiredRefreshTokens = async () => {
         const now = new Date();
-        await this.#tokenDAO.revokeAllRefreshTokens({ expireDate: { $lt: now }});
+        await this.#tokenDAO.deleteAllRefreshTokens({ expireDate: { $lt: now }});
     }
 }
 

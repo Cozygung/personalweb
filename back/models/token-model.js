@@ -7,12 +7,17 @@ const makeModel = (ODM) => {
     const tokenSchema = new ODM.Schema({
         refreshToken: {
             type: String,
-            required: true
+            required: true,
+            unique: true
         },
         username: {
             type: String,
             required: true,
             unique: true
+        },
+        creationDate: {
+            type: Date,
+            default: Date.now,
         },
         expireDate: {
             type: Date,

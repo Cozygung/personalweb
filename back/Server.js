@@ -83,8 +83,9 @@ const userRouter = makeUserRouter(csrfProtection, authService, userService, user
 app.use(limiter);
 app.use(userRouter);
 
-const interval = setInterval(authService.removeExpiredTokens, 60 * 60 * 1000);
-authService.removeExpiredTokens();
+// TODO: Check if removing expired tokens works
+const interval = setInterval(authService.deleteAllExpiredRefreshTokens, 60 * 60 * 1000);
+authService.deleteAllExpiredRefreshTokens();
 
 // Clear the interval when the server is stopped
 process.on('SIGINT', () => {

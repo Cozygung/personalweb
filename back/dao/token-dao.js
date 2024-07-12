@@ -1,6 +1,6 @@
 class TokenDao {
     #tokenModel; 
-
+    
     constructor(tokenModel) {
         this.#tokenModel = tokenModel;
     }
@@ -10,7 +10,7 @@ class TokenDao {
         return !!isValid
     };
 
-    async activateRefreshToken(refreshToken) {
+    async addRefreshToken(refreshToken) {
         const tokenInstance = new this.#tokenModel(refreshToken);
         await tokenInstance.save();
 
@@ -29,11 +29,11 @@ class TokenDao {
         return await this.#tokenModel.findByIdAndUpdate(tokenId, tokenUpdates, { new: true })
     };
 
-    async revokeRefreshToken(query) {
+    async deleteRefreshToken(query) {
         return await this.#tokenModel.findOneAndDelete(query)
     }
 
-    async revokeAllRefreshTokens(query) {
+    async deleteAllRefreshTokens(query) {
         return await this.#tokenModel.deleteMany(query)
     }
 }

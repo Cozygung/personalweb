@@ -1,6 +1,5 @@
-import { ReasonPhrases, StatusCodes } from "http-status-codes";
-import bcrypt from "bcrypt";
-import { ServerError } from "../errors/server-error.js";
+import bcrypt from 'bcrypt';
+import {NotFoundError} from '../errors/not-found-error.js';
 
 class UserService {
     #userDAO;
@@ -9,30 +8,27 @@ class UserService {
         this.#userDAO = userDAO;
     }
 
+    async checkUniqueUsername(username) {
+        return await this.#userDAO.checkUniqueUsername(username)
+    };
+
     async createUser(user) {
-        if (!await this.#userDAO.checkUniqueUsername(user.username)) {
-            throw new ServerError(StatusCodes.NOT_ACCEPTABLE, "Username is not unique");
-        }
-        
         user.password = await bcrypt.hash(user.password, 12);
         const userInstance = await this.#userDAO.createUser(user)
-        console.log("User created " + userInstance);
+        console.log('User created ' + userInstance);
+        
         return userInstance
     }
 
     async getUserById(userId) {
         const user = await this.#userDAO.getUserById(userId);
-        if (!user) {
-            throw new ServerError(StatusCodes.NOT_FOUND, ReasonPhrases.NOT_FOUND)
-        }
+        
         return user
     };
     
     async getUser(queryFilter) {
         const user = await this.#userDAO.getUser(queryFilter);
-        if (!user) {
-            throw new ServerError(StatusCodes.NOT_FOUND, ReasonPhrases.NOT_FOUND)
-        }
+        
         return user
     }
 
@@ -41,23 +37,33 @@ class UserService {
     }
 
     async updateUser(userId, updates) {
-        return await this.#userDAO.updateUser(userId, updates)
+        const updatedUser = await this.#userDAO.updateUser(userId, updates);
+        if (!updatedUser) {
+            throw new NotFoundError(`User ${userId} does not exist`);
+        }
+        return updatedUser
     };
 
     async deleteUserById(userId) {
-        const user = this.#userDAO.getUserById(userId);
-        
-        // Only the Admin or the user who owns the account can delete their account
-        if (user.userType !== "Admin" && user._id !== userId) {
-            throw new ServerError(StatusCodes.FORBIDDEN, ReasonPhrases.FORBIDDEN)
+        const deletedUser = await this.#userDAO.deleteUserById(userId);
+        if (!deletedUser) {
+            throw new NotFoundError(`User ${userId} does not exist`);
         }
         
-        const document = await this.#userDAO.deleteUserById(userId);
-        console.log("User deleted: " + document);
-        
-        // await Course.deleteMany({teachers: {$elemMatch: {_id: userId}}});
-        
-        return document
+        return deletedUser;
+        // TODO: await Course.deleteMany({teachers: {$elemMatch: {_id: userId}}});
+    }
+    
+    /**
+     * @returns a positive number if userTypeA is higher privilege than userTypeB
+     * */
+    compareUserType(userTypeA, userTypeB) {
+        const userTypeEnumList = this.#userDAO.getUserTypeEnumList();
+        return userTypeEnumList.indexOf(userTypeA) - userTypeEnumList.indexOf(userTypeB);
+    }
+
+    getUserTypeEnumList() {
+        return this.#userDAO.getUserTypeEnumList();
     }
 }
 

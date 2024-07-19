@@ -17,8 +17,8 @@ class TokenDao {
         return tokenInstance
     };
 
-    async getRefreshTokenByUsername(username) {
-        return await this.#tokenModel.findOne({ username: username })
+    async getRefreshTokenByUserId(userId) {
+        return await this.#tokenModel.findOne({ userId: userId })
     };
 
     async getRefreshTokenList(queryFilter) {

@@ -1,26 +1,29 @@
-import * as dotenv from "dotenv";
-import express from "express";
-import { Mongoose } from "mongoose";
+import * as dotenv from 'dotenv';
+import express from 'express';
+import { Mongoose } from 'mongoose';
+import {StatusCodes} from 'http-status-codes';
 
 // Security
-import cors from "cors";
-import cookieParser from "cookie-parser";
-import csrf from "csurf";
-import { rateLimit } from "express-rate-limit";
-import MongoStore from "rate-limit-mongo";
+import cors from 'cors';
+import cookieParser from 'cookie-parser';
+import csrf from 'csurf';
+import { rateLimit } from 'express-rate-limit';
+import MongoStore from 'rate-limit-mongo';
 
 // Services
-import AuthService from "./middleware/auth-service.js";
+import AuthService from './middleware/auth-service.js';
 
-import makeUserModel from "./models/user-model.js";
-import makeRefreshTokenModel from "./models/token-model.js";
-import UserDao from "./dao/user-dao.js";
-import TokenDao from "./dao/token-dao.js";
-import UserService from "./middleware/user-service.js";
+import makeUserModel from './models/user-model.js';
+import makeRefreshTokenModel from './models/token-model.js';
+import UserDao from './dao/user-dao.js';
+import TokenDao from './dao/token-dao.js';
+import UserService from './middleware/user-service.js';
 
 // Routers
-import makeUserRouter from "./routers/user-router.js";
-import UserValidator from "./middleware/validator/user-validator.js";
+import makeUserRouter from './routers/user-router.js';
+import UserValidator from './middleware/validator/user-validator.js';
+import {ServerError} from './errors/server-error.js';
+import {NotFoundError} from './errors/not-found-error.js';
 
 // Load Environment Variables from .env.production
 dotenv.config({path: `config/.env.${process.env.NODE_ENV}`});
@@ -49,8 +52,8 @@ const refreshTokenDAO = new TokenDao(refreshTokenModel);
 // User Middleware
 const userModel = makeUserModel(mongoose);
 const userDao = new UserDao(userModel);
-const userValidator = new UserValidator(userModel);
 const userService = new UserService(userDao);
+const userValidator = new UserValidator(userService);
 
 // Security
 const authService = new AuthService(refreshTokenDAO);
@@ -64,7 +67,7 @@ const csrfProtection = csrf({ cookie: {
 // TODO: Change Limiter
 const limiter = rateLimit({
     store: new MongoStore({
-        uri: process.env.DB_URL + "rate-limit",
+        uri: process.env.DB_URL + 'rate-limit',
         expireTimeMs: 15 * 60 * 1000, // should match windowMs
         errorHandler: console.error.bind(null, 'rate-limit-mongo'),
         keyGenerator: function(req) {
@@ -84,8 +87,11 @@ app.use(limiter);
 app.use(userRouter);
 
 // TODO: Check if removing expired tokens works
-const interval = setInterval(authService.deleteAllExpiredRefreshTokens, 60 * 60 * 1000);
-authService.deleteAllExpiredRefreshTokens();
+// Delete all expired refresh tokens
+const interval = setInterval(() => {
+    authService.deleteAllRefreshTokens({ expireDate: {$lt: new Date()} })
+}, 60 * 60 * 1000);
+authService.deleteAllRefreshTokens( { expireDate: { $lt: new Date() }});
 
 // Clear the interval when the server is stopped
 process.on('SIGINT', () => {
@@ -93,13 +99,34 @@ process.on('SIGINT', () => {
     console.log('Interval cleared');
 });
 
+// Handle errors
 app.use((error, req, res, next) => {
-    if (error.code === "EBADCSRFTOKEN") {
-        return res.status(403).json({ error: 'CSRF token validation failed' });
-    }
+    const { code, message, name } = error;
     console.log(error);
-    const { status, message } = error;
-    return res.status(status || 500).json({ error: message });
+    
+    if (code === 'EBADCSRFTOKEN') {
+        return res.status(StatusCodes.FORBIDDEN).json({ error: new ServerError(StatusCodes.FORBIDDEN, 'CSRF token validation failed', name) });
+    }
+    
+    switch (name) {
+        case 'CastError':
+            return res.status(StatusCodes.NOT_FOUND).json({ error: new NotFoundError('User not found') });
+        case 'ValidationError':
+            return res.status(code).json({ error: error });
+        case 'AuthenticationError':
+            return res.status(code).json({ error: error });
+        case 'TokenExpiredError':
+            return res.status(code).json({ error: error });
+        case 'JsonWebTokenError':
+            return res.status(code).json({ error: error });
+    }
+    
+    
+    if (typeof code === 'number') {
+        return res.status(code).json({ error: new ServerError(code, message, name) });
+    } else {
+        return res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ error: new ServerError(StatusCodes.INTERNAL_SERVER_ERROR, message, name) });
+    }
 });
 
 mongoose.connect(process.env.DB_URL + process.env.DB_QUERY_PARAM)
@@ -107,5 +134,5 @@ mongoose.connect(process.env.DB_URL + process.env.DB_QUERY_PARAM)
         app.listen(port, () => console.log(`App server listening on port ${port}!`))
     })
     .catch((error) => {
-        console.log("There is an error with the Mongoose connection: " + error);
+        console.log('There is an error with the Mongoose connection: ' + error);
     });

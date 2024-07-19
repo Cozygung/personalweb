@@ -36,6 +36,10 @@ class UserDao {
     async deleteUserById(userId) {
         return await this.#userModel.findByIdAndDelete(userId)
     }
+    
+    getUserTypeEnumList() {
+        return this.#userModel.schema.path('userType').enumValues
+    }
 }
 
 export default UserDao;

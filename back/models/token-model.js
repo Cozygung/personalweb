@@ -10,7 +10,7 @@ const makeModel = (ODM) => {
             required: true,
             unique: true
         },
-        username: {
+        userId: {
             type: String,
             required: true,
             unique: true
@@ -24,6 +24,8 @@ const makeModel = (ODM) => {
             required: true
         }
     });
+
+    tokenSchema.index({ userId: 1 });
 
     return ODM.model('JWT-Refresh-Token', tokenSchema);
 }

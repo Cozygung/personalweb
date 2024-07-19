@@ -1,6 +1,9 @@
+import {StatusCodes} from 'http-status-codes';
+
 export class ServerError extends Error {
-    constructor(code, message) {
+    constructor(message) {
         super(message);
-        this.code = code;
+        this.code = StatusCodes.INTERNAL_SERVER_ERROR;
+        this.name = 'ServerError';
     }
 }

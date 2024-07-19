@@ -27,11 +27,11 @@ instance.interceptors.request.use(
     config => {
         // Modify request headers or do something before request is sent
         if (token) {
-            config.headers["Authorization"] = `Bearer ${token}`;
+            config.headers['Authorization'] = `Bearer ${token}`;
             console.log(token)
         }
         if (csrf) {
-            config.headers["xsrf-token"] = csrf;
+            config.headers['xsrf-token'] = csrf;
             console.log(csrf)
         }
         
@@ -50,16 +50,17 @@ instance.interceptors.response.use(
     },
     async error => {
         // Handle error responses
-        if (axios.isAxiosError(error) && error.response && error.response.status === HttpStatusCode.Unauthorized) {
-            // Check if the error is due to TokenExpiredError
-            // TODO: Implement for RefreshTokenExpiredError
-            if (error.response.data.error === 'TokenExpiredError' || error.response.data.error === 'MissingTokenError') {
+        if (axios.isAxiosError(error) && error.response) {
+            // Check if the error is due to Access Token Expiring
+            if (error.response.data.error.name === 'TokenExpiredError' && error.response.data.error.type === 1 
+                || error.response.data.error.name === 'AuthenticationError' && error.response.data.error.type === 1) {
                 try {
                     // Attempt to refresh token
                     const refreshedAccessToken = await refreshToken();
                     setToken(refreshedAccessToken);
                     // Retry the original request with the new token
                     error.config.headers.Authorization = `Bearer ${refreshedAccessToken}`;
+                    
                     return instance.request(error.config);
                 } catch (refreshError) {
                     // Handle refresh token failure
@@ -80,7 +81,7 @@ instance.interceptors.response.use(
 );
 
 async function refreshToken() {
-    console.log("Refreshing Token")
+    console.log('Refreshing Token')
     const tokenConfig = {
         baseURL: 'http://localhost:3000',
         timeout: 10000, // Timeout in milliseconds
@@ -91,7 +92,12 @@ async function refreshToken() {
         },
         withCredentials: true
     };
-    const res = await axios.post('http://localhost:3000/token', {}, tokenConfig);
+    const res = await axios.post('http://localhost:3000/token', {}, tokenConfig).catch(error => {
+        console.log(error)
+        if (error.response) {
+            console.error(error.response.data.error);
+        }
+    });
     console.log(res);
     
     return res.data.accessToken;

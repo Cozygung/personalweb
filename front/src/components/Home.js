@@ -1,9 +1,8 @@
 import React, {useEffect, useState} from 'react';
 import axiosInstance from '../AxiosModule';
 import '../styles/App.css';
-import logo from "../logo.svg";
+import logo from '../logo.svg';
 
-// TODO: Implement error catching with requests
 function Home() {
     async function login() {
         const payload = {
@@ -13,7 +12,12 @@ function Home() {
 
         const res = await axiosInstance.post('/login', JSON.stringify(payload),  {
             withCredentials: true
-        })
+        }).catch(error => {
+            console.log(error)
+            if (error.response) {
+                console.error(error.response.data.error);
+            }
+        });
         axiosInstance.setToken(res.data.accessToken);
         
         const csrf = await axiosInstance.get('http://localhost:3000/form');
@@ -23,6 +27,11 @@ function Home() {
     async function logout() {
         const res = await axiosInstance.post('/logout', {},  {
             withCredentials: true
+        }).catch(error => {
+            console.log(error)
+            if (error.response) {
+                console.error(error.response.data.error);
+            } 
         });
         
         console.log(res);
@@ -32,15 +41,20 @@ function Home() {
 
     async function createUser() {
         const payload = {
-            username: "alex66081",
-            firstName: "Alex",
-            lastName: "Kim",
-            password: "Alex6608",
-            userType: "Admin",
+            username: 'alex66081',
+            firstName: 'Alex',
+            lastName: 'Kim',
+            password: 'Abcdefghijklmnopqrstuvwxyz123456',
+            userType: 'Admin',
         };
 
-        const res = await axiosInstance.post('/user', JSON.stringify(payload), {
+        const res = await axiosInstance.post('/users', JSON.stringify(payload), {
             withCredentials: true
+        }).catch(error => {
+            console.log(error)
+            if (error.response) {
+                console.error(error.response.data.error);
+            }
         });
         
         console.log(res);
@@ -74,17 +88,17 @@ function Home() {
     }, []); // Empty dependency array ensures this effect runs only once, on mount
 
     return (
-        <div className="App">
-            <header className="App-header">
-                <img src={logo} className="App-logo" alt="logo" />
+        <div className='App'>
+            <header className='App-header'>
+                <img src={logo} className='App-logo' alt='logo' />
                 <p>
                     Edit <code>src/App.js</code> and save to reload.
                 </p>
                 <a
-                    className="App-link"
-                    href="https://reactjs.org"
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    className='App-link'
+                    href='https://reactjs.org'
+                    target='_blank'
+                    rel='noopener noreferrer'
                 >
                     Learn React
                 </a>

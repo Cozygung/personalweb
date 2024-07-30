@@ -1,5 +1,5 @@
 import React from 'react';
-import axiosInstance from '../AxiosModule';
+import axiosInstance from '../modules/AxiosModule';
 
 function Dashboard() {
     const handleLogout = async () => {

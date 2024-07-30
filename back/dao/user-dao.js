@@ -25,12 +25,15 @@ class UserDao {
         return await this.#userModel.findOne(queryFilter)
     }
 
-    async getUserList(queryFilter) {
-        return await this.#userModel.find(queryFilter)
+    async getUserList(filter, limit, page, sortBy) {
+        return await this.#userModel.find(filter)
+            .skip((page - 1) * limit)
+            .limit(limit)
+            .sort(sortBy);
     };
 
     async updateUser(userId, userUpdates) {
-        return await this.#userModel.findByIdAndUpdate(userId, userUpdates, { new: true })
+        return await this.#userModel.findByIdAndUpdate(userId, userUpdates, { new: true, useFindAndModify: false })
     };
 
     async deleteUserById(userId) {

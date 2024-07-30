@@ -1,9 +1,13 @@
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import {semver} from "nodemon/lib/utils/index.js";
+import axios from 'axios';
+
 import {TokenExpiredError} from '../errors/token-expired-error.js';
 import {ForbiddenError} from '../errors/forbidden-error.js';
 import {AuthenticationError} from '../errors/authentication-error.js';
 import {JsonWebTokenError} from "../errors/jwt-error.js";
+import {ConflictError} from "../errors/conflict-error.js";
 
 class AuthService {
     #tokenDAO;
@@ -184,65 +188,85 @@ class AuthService {
     }
     
     /**
-     * Creates a new JWT token. Enforces the HS256 algorithm to prevent 'NONE' hashing algorithm attack
+     * Creates a new JWT access token. Enforces the HS256 algorithm to prevent 'NONE' hashing algorithm attack
      * @param {Object} user - Object containing the _id and userType of a user
-     * @param {Boolean} createRefreshToken - True if you want to create a refreshToken, otherwise defaults to false
-     * @returns {Object} EncryptedToken and the fingerprint that marks its identity
+     * @returns {Object} EncryptedToken, fingerprint that marks the token's identity
      * */
-    createToken = async (user, createRefreshToken= false) => {
-        const SECRET_KEY = createRefreshToken ? process.env.JWT_REFRESH_TOKEN_SECRET : process.env.JWT_ACCESS_TOKEN_SECRET;
-        const EXPIRE_TIME = createRefreshToken ? process.env.JWT_REFRESH_TOKEN_EXPIRE_TIME : process.env.JWT_ACCESS_TOKEN_EXPIRE_TIME;
+    createAccessToken = async (user) => {
+        const SECRET_KEY = process.env.JWT_ACCESS_TOKEN_SECRET;
+        const EXPIRE_TIME = process.env.JWT_ACCESS_TOKEN_EXPIRE_TIME;
         
-        if (createRefreshToken) {
-            // Check if refresh token already exists for the user
-            const existingEncryptedRefreshToken = await this.#tokenDAO.getRefreshTokenByUserId(user._id.toString());
-            if (existingEncryptedRefreshToken) {
-                const token = this.decryptToken(existingEncryptedRefreshToken.refreshToken);
-                const decoded = await jwt.decode(token, SECRET_KEY);
-                const expiryDate = new Date(decoded.exp * 1000);
-                const currentDate = new Date();
-                
-                // If token is expired remove it from the DB and create a new token
-                if (expiryDate < currentDate) {
-                    await this.#tokenDAO.deleteRefreshToken(existingEncryptedRefreshToken)
-                } else {
-                    return { token: existingEncryptedRefreshToken.refreshToken, fingerprint: decoded.fingerprint }
-                }
-            }
-        }
-        const userFingerprint = crypto.randomBytes(16).toString('hex');
-        const token = await this.jwtSignToken(user, userFingerprint, SECRET_KEY, parseInt(EXPIRE_TIME, 10), process.env.JWT_ISSUER);
+        const fingerprint = crypto.randomBytes(16).toString('hex');
+        const token = await this.jwtSignToken(user, fingerprint, SECRET_KEY, parseInt(EXPIRE_TIME, 10), process.env.JWT_ISSUER);
         const encryptedToken = this.encryptToken(token);
         
-        if (createRefreshToken) {
+        return {accessToken: encryptedToken, accessTokenFingerprint: fingerprint}
+    }
+
+    /**
+     * Creates a new JWT refresh token. Enforces the HS256 algorithm to prevent 'NONE' hashing algorithm attack
+     * @param {Object} user - Object containing the _id and userType of a user
+     * @param {Object} newDevice - Object containing user device ip address and device info
+     * @returns {Object} EncryptedToken, fingerprint that marks the token's identity, deviceId, token expire date
+     * */
+    createRefreshToken = async (user, newDevice) => {
+        const SECRET_KEY = process.env.JWT_REFRESH_TOKEN_SECRET;
+        const EXPIRE_TIME = process.env.JWT_REFRESH_TOKEN_EXPIRE_TIME;
+        
+        // Check if refresh token already exists in the DB
+        // TODO: We only need to fetch the refreshToken JWT string & expireDate 
+        const existingRefreshToken = await this.#tokenDAO.getRefreshTokenByUserId(user._id);
+        
+        // If it exists attempt to reuse it
+        if (existingRefreshToken) {
+            const token = this.decryptToken(existingRefreshToken);
             const decoded = await jwt.decode(token, SECRET_KEY);
             const expireDate = new Date(decoded.exp * 1000)
-
-            const refreshTokenObject = {
-                refreshToken: encryptedToken,
-                userId: user._id.toString(),
-                expireDate: expireDate
+            
+            // Check if this device is already registered
+            const device = await this.findExistingDeviceInRefreshTokenDocument(user._id, newDevice);
+            if (device) {
+                return { refreshToken: existingRefreshToken, refreshTokenFingerprint: decoded.fingerprint,
+                    refreshTokenExpireDate: expireDate, deviceId: device._id }
             }
-            await this.#tokenDAO.addRefreshToken(refreshTokenObject)
+            
+            // If it isn't, register the device
+            await this.#tokenDAO.addDevice(user._id, newDevice);
+
+            return { refreshToken: existingRefreshToken, refreshTokenFingerprint: decoded.fingerprint,
+                refreshTokenExpireDate: expireDate, deviceId: newDevice._id }
+            
         }
         
-        return {token: encryptedToken, fingerprint: userFingerprint}
+        // Create a new refreshToken if there are none registered in the DB
+        const fingerprint = crypto.randomBytes(16).toString('hex');
+        const token = await this.jwtSignToken(user, fingerprint, SECRET_KEY, parseInt(EXPIRE_TIME, 10), process.env.JWT_ISSUER);
+        const encryptedToken = this.encryptToken(token);
+        
+        const decoded = await jwt.decode(token, SECRET_KEY);
+        const expireDate = new Date(decoded.exp * 1000)
+
+        const refreshTokenObject = {
+            refreshToken: encryptedToken,
+            userId: user._id,
+            expireDate: expireDate,
+            devices: [newDevice]
+        }
+        const refreshToken = await this.#tokenDAO.addRefreshToken(refreshTokenObject);
+        return {refreshToken: encryptedToken, refreshTokenFingerprint: fingerprint, refreshTokenExpireDate: expireDate,
+        deviceId: newDevice._id}
     }
 
     /**
      * Creates a new JWT token. Enforces the HS256 algorithm to prevent 'NONE' hashing algorithm attack
-     * @param {Object} encryptedRefreshToken - Encrypted JWT refreshToken
+     * @param {String} encryptedRefreshToken - Encrypted JWT refreshToken
      * @param {String} fingerprint - Unique fingerprint that marks the identity of the token
+     * @param {Object} userDevice - Object containing info about user's device
      * @returns {Object} accessToken - JSON object containing the encryptedToken and the fingerprint that marks its identity
      * @returns InvalidTokenError (401) if refreshToken is missing or invalid (IE. Not stored in the DB whitelist)
      * @returns TokenExpiredError (401) if refreshToken is expired
      * */
-    refreshAccessToken = async (encryptedRefreshToken, fingerprint) => {
-        console.log('refreshing')
-        const refreshToken = this.decryptToken(encryptedRefreshToken);
-        const SECRET_KEY = process.env.JWT_REFRESH_TOKEN_SECRET;
-        const EXPIRE_TIME = parseInt(process.env.JWT_REFRESH_TOKEN_EXPIRE_TIME, 10);
-        
+    refreshAccessToken = async (encryptedRefreshToken, fingerprint, userDevice) => {
         // Check if refreshToken exists and is valid
         if (!encryptedRefreshToken) {
             throw new AuthenticationError('Missing Refresh Token', 2)
@@ -251,17 +275,114 @@ class AuthService {
             throw new AuthenticationError( 'Invalid Refresh Token', 2)
         }
         
+        console.log('refreshing')
+        const refreshToken = this.decryptToken(encryptedRefreshToken);
+        const SECRET_KEY = process.env.JWT_REFRESH_TOKEN_SECRET;
+        const EXPIRE_TIME = parseInt(process.env.JWT_REFRESH_TOKEN_EXPIRE_TIME, 10);
+        
         return await this.jwtVerifyToken(refreshToken, fingerprint, SECRET_KEY, EXPIRE_TIME, 2).then(async (decoded) => {
             // We don't want to rotate refresh tokens otherwise other concurrent devices will be signed out
             const {_id, userType} = decoded;
             const user = {_id, userType};
+            
+            const existingDevice = await this.findExistingDeviceInRefreshTokenDocument(_id, userDevice);
+            const temp = await this.createAccessToken(user)
 
-            return await this.createToken(user);
+            return {...temp, deviceId: existingDevice._id, userId: _id};
         });
     }
+
+    /**
+     * Creates a new JWT token. Enforces the HS256 algorithm to prevent 'NONE' hashing algorithm attack
+     * @param {ObjectId} userId - userId
+     * @param {Object} userDevice - Object containing info about user's device
+     * @returns {Object} device - JSON object that is identical or has identical characteristics as the userDevice
+     * */
+    findExistingDeviceInRefreshTokenDocument = async (userId, userDevice) => {
+        const sameDevice = await this.#tokenDAO.getDevice(userId, {_id: userDevice._id})
+        if (sameDevice) {
+            return sameDevice
+        }
+
+        const matchingKeys = ['userAgent.os', 'userAgent.cpu', 'windowScreen', 'webGLInfo'];
+        const filteredQuery = Object.keys(userDevice)
+            .filter(key => matchingKeys.includes(key))
+            .reduce((obj, key) => {
+                obj[key] = userDevice[key];
+                return obj;
+            }, {});
+
+        const similarDevice = await this.#tokenDAO.getDevice(userId, filteredQuery)
+        if (similarDevice) {
+            // TODO: If IP Address changed, send a confirmation email
+            return similarDevice
+        }
+        
+        return null
+    }
     
-    deleteRefreshToken = async (refreshToken)  => {
-        return await this.#tokenDAO.deleteRefreshToken({ refreshToken: refreshToken })
+    logoutDevice = async (userId, deviceId) => {
+        const updatedToken = await this.#tokenDAO.removeDevice(userId, deviceId)
+        console.log(updatedToken)
+        
+        // If no other devices are using this refreshToken, delete it
+        if (updatedToken && updatedToken.devices.length === 0) {
+            await this.deleteRefreshTokenByUserId(userId)
+        } 
+        
+        /*const client = new MongoClient('your_mongodb_connection_string');
+
+          try {
+            await client.connect();
+            const database = client.db('your_database_name');
+            const tokensCollection = database.collection('tokens');
+        
+            const session = client.startSession();
+        
+            session.startTransaction();
+        
+            // Step 1: Remove the device
+            const updatedToken = await tokensCollection.findOneAndUpdate(
+              { _id: tokenId },
+              { $pull: { devices: { deviceId: deviceId } } },
+              { returnDocument: 'after', session } // Use the session for transaction
+            );
+        
+            // Step 2: Check if the devices array is empty
+            if (updatedToken.value && updatedToken.value.devices.length === 0) {
+              // Step 3: Delete the token document
+              await tokensCollection.deleteOne({ _id: tokenId }, { session });
+              console.log('Token deleted as there are no more devices linked to it.');
+            } else {
+              console.log('Device removed. Updated token:', updatedToken.value);
+            }
+        
+            await session.commitTransaction();
+          } catch (error) {
+                console.error('Error removing device and possibly deleting token:', error);
+            await session.abortTransaction();
+          } finally {
+            session.endSession();
+            await client.close();
+          }*/
+    }
+
+    async addLoginInstance(userId, loginInstance) {
+        return await this.#tokenDAO.getRefreshTokenByUserIdAndUpdate(userId, { $push: { loginHistory: loginInstance } })
+    }
+
+    async getIPInfo(ipAddress) {
+        // TODO: SSL Not available for free version
+        const ipAPIResponse = await axios.get(`http://ip-api.com/json/${ipAddress}`);
+        return ipAPIResponse.data;
+    }
+    
+    deleteRefreshTokenByUserId = async (userId)  => {
+        return await this.#tokenDAO.deleteRefreshToken({ userId: userId })
+    }
+    
+    deleteExpiredTokens = async () => {
+        await this.#tokenDAO.deleteAllRefreshTokens({ expireDate: {$lt: new Date()} })
     }
     
     deleteAllRefreshTokens = async (query) => {

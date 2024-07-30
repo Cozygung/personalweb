@@ -1,5 +1,7 @@
 import bcrypt from 'bcrypt';
 import {NotFoundError} from '../errors/not-found-error.js';
+import {ConflictError} from "../errors/conflict-error.js";
+import {ServerError} from "../errors/server-error.js";
 
 class UserService {
     #userDAO;
@@ -14,7 +16,14 @@ class UserService {
 
     async createUser(user) {
         user.password = await bcrypt.hash(user.password, 12);
-        const userInstance = await this.#userDAO.createUser(user)
+        const userInstance = await this.#userDAO.createUser(user).catch((error) => {
+            console.log("Create User Error: ", error);
+            if (error.code === 11000) {
+                throw new ConflictError('This username is taken! Pick another username');
+            } else {
+                throw new ServerError(error.message);
+            }
+        })
         console.log('User created ' + userInstance);
         
         return userInstance
@@ -32,8 +41,9 @@ class UserService {
         return user
     }
 
-    async getUserList(queryFilter) {
-        return await this.#userDAO.getUserList(queryFilter)
+    // TODO: Implement filtering, sorting, and pagination
+    async getUserList(filter, limit = 20, page = 1, sortBy) {
+        return await this.#userDAO.getUserList(filter, limit, page, sortBy)
     }
 
     async updateUser(userId, updates) {

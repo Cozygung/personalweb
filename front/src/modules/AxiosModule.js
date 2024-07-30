@@ -1,4 +1,5 @@
 import axios, {AxiosRequestConfig, HttpStatusCode} from 'axios';
+import {getUserDeviceInfo} from "./UserDeviceModule";
 
 let token = '';
 let csrf = '';
@@ -13,6 +14,7 @@ const setCSRFToken = (newToken) => {
 }
 
 // TODO: Test timeout
+// Double Quotation marks 
 const instance = axios.create({
     baseURL: 'http://localhost:3000',
     timeout: 10000, // Timeout in milliseconds
@@ -35,6 +37,11 @@ instance.interceptors.request.use(
             console.log(csrf)
         }
         
+        // TODO: We only need to send in deviceId on every request (In the header)
+        // TODO: Send Full device info only on login + logout (In the body)
+        config.headers['device'] = JSON.stringify(getUserDeviceInfo());
+        console.log(config.headers['device'])
+        
         return config;
     },
     error => {
@@ -49,11 +56,13 @@ instance.interceptors.response.use(
         return response;
     },
     async error => {
+        const errorName = error.response.data.error?.name ?? undefined;
+        const errorType = error.response.data.error?.type ?? undefined;
         // Handle error responses
         if (axios.isAxiosError(error) && error.response) {
             // Check if the error is due to Access Token Expiring
-            if (error.response.data.error.name === 'TokenExpiredError' && error.response.data.error.type === 1 
-                || error.response.data.error.name === 'AuthenticationError' && error.response.data.error.type === 1) {
+            if (errorName === 'TokenExpiredError' && errorType === 1 
+                || errorName === 'AuthenticationError' && errorType === 1) {
                 try {
                     // Attempt to refresh token
                     const refreshedAccessToken = await refreshToken();
@@ -82,23 +91,21 @@ instance.interceptors.response.use(
 
 async function refreshToken() {
     console.log('Refreshing Token')
-    const tokenConfig = {
-        baseURL: 'http://localhost:3000',
-        timeout: 10000, // Timeout in milliseconds
-        headers: {
-            'Authorization': 'Bearer ' + token,
-            'xsrf-token': csrf,
-            'Content-Type': 'application/json'
-        },
+    const res = await instance.post('/token', {}, {
         withCredentials: true
-    };
-    const res = await axios.post('http://localhost:3000/token', {}, tokenConfig).catch(error => {
+    }).catch(error => {
         console.log(error)
-        if (error.response) {
-            console.error(error.response.data.error);
+        
+        const { code, message, name } = error.response.data.error;
+        const type = error.response.data.error.type ?? undefined;
+        
+        if (name === 'AuthenticationError' && type === 2 || name === 'TokenExpiredError' && type === 2) {
+            setToken('');
         }
     });
-    console.log(res);
+    if (res.data.deviceId) {
+        localStorage.setItem('deviceId', res.data.deviceId);
+    }
     
     return res.data.accessToken;
 }

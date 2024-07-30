@@ -1,7 +1,8 @@
 import React, {useEffect, useState} from 'react';
-import axiosInstance from '../AxiosModule';
+import axiosInstance from '../modules/AxiosModule';
 import '../styles/App.css';
 import logo from '../logo.svg';
+import axios from "axios";
 
 function Home() {
     async function login() {
@@ -10,6 +11,7 @@ function Home() {
             password: 'Alex6608'
         };
 
+        // TODO: Login + CSRF needs to be atomic
         const res = await axiosInstance.post('/login', JSON.stringify(payload),  {
             withCredentials: true
         }).catch(error => {
@@ -18,7 +20,12 @@ function Home() {
                 console.error(error.response.data.error);
             }
         });
+        // Not using localstorage for accessToken. Security is more important & we don't need it to persist across tabs
         axiosInstance.setToken(res.data.accessToken);
+        if (res.data.deviceId) {
+            localStorage.setItem('deviceId', res.data.deviceId)
+        }
+        console.log(localStorage.getItem('deviceId'))
         
         const csrf = await axiosInstance.get('http://localhost:3000/form');
         axiosInstance.setCSRFToken(csrf.data.csrfToken);
@@ -29,13 +36,24 @@ function Home() {
             withCredentials: true
         }).catch(error => {
             console.log(error)
-            if (error.response) {
-                console.error(error.response.data.error);
-            } 
         });
         
+        localStorage.clear();
         console.log(res);
         
+        // TODO: Redirect the user to home page
+    }
+
+    async function test() {
+        const res = await axiosInstance.get('/test', {
+            withCredentials: true
+        }).catch(error => {
+            console.log(error)
+        });
+
+        localStorage.clear();
+        console.log(res);
+
         // TODO: Redirect the user to home page
     }
 
@@ -48,7 +66,7 @@ function Home() {
             userType: 'Admin',
         };
 
-        const res = await axiosInstance.post('/users', JSON.stringify(payload), {
+        const res = await axiosInstance.post('/v1/users', JSON.stringify(payload), {
             withCredentials: true
         }).catch(error => {
             console.log(error)
@@ -59,8 +77,9 @@ function Home() {
         
         console.log(res);
     }
+    
+    // TODO: Make a query to /form when a user opens a session while logged in
 
-    // TODO: Maybe we don't need to Delete JWT tokens stored in Cookie and DB once user closes tab
     useEffect(() => {
         // Function to handle the beforeunload event
         const handleBeforeUnload = (event) => {
@@ -69,9 +88,6 @@ function Home() {
 
             // Set the return message here (Older Browsers)
             event.returnValue = '';
-
-            // Logout user 
-            logout();
 
             // Set the return message (Modern Browsers)
             return ''
@@ -105,6 +121,7 @@ function Home() {
                 <button onClick={createUser}>create user</button>
                 <button onClick={login}>login</button>
                 <button onClick={logout}>logout</button>
+                <button onClick={test}>test</button>
             </header>
         </div>
     );

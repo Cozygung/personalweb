@@ -1,11 +1,11 @@
 /**
  * Represents a user in the system.
  * @typedef {Object} User
- * @property {string} username - Username | Must be unique.
- * @property {string} firstname - First Name
- * @property {string} lastname - Last Name
- * @property {string} password - password | Length > 8 
- * @property {string} userType - User Privilege | Admin or Teacher or Student
+ * @property {String} username - Username | Must be unique.
+ * @property {String} firstname - First Name
+ * @property {String} lastname - Last Name
+ * @property {String} password - password | Length > 8 
+ * @property {String} userType - User Privilege | Admin or Teacher or Student
  */
 
 export const userPrivileges = ['Admin','Teacher', 'Student'];
@@ -31,11 +31,10 @@ const makeModel = (ODM) => {
             maxlength: 24,
             trim: true,
         },
-        // No maxlength because password is encrypted
         password: {
             type: String,
             required: true,
-            minlength: 8,
+            minlength: 8, // No maxlength because password is encrypted
             trim: true,
         },
         userType: {

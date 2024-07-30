@@ -24,6 +24,7 @@ import makeUserRouter from './routers/user-router.js';
 import UserValidator from './middleware/validator/user-validator.js';
 import {ServerError} from './errors/server-error.js';
 import {NotFoundError} from './errors/not-found-error.js';
+import UserController from "./controllers/user-controller.js";
 
 // Load Environment Variables from .env.production
 dotenv.config({path: `config/.env.${process.env.NODE_ENV}`});
@@ -49,12 +50,6 @@ app.use(cookieParser(process.env.COOKIE_PARSER_SECRET));
 const refreshTokenModel = makeRefreshTokenModel(mongoose);
 const refreshTokenDAO = new TokenDao(refreshTokenModel);
 
-// User Middleware
-const userModel = makeUserModel(mongoose);
-const userDao = new UserDao(userModel);
-const userService = new UserService(userDao);
-const userValidator = new UserValidator(userService);
-
 // Security
 const authService = new AuthService(refreshTokenDAO);
 const csrfProtection = csrf({ cookie: {
@@ -64,7 +59,6 @@ const csrfProtection = csrf({ cookie: {
         sameSite: 'strict',
     }});
 
-// TODO: Change Limiter
 const limiter = rateLimit({
     store: new MongoStore({
         uri: process.env.DB_URL + 'rate-limit',
@@ -78,20 +72,27 @@ const limiter = rateLimit({
     windowMs: 15 * 60 * 1000 // should match expireTimeMs
 });
 
+// User Middleware
+const userModel = makeUserModel(mongoose);
+const userDao = new UserDao(userModel);
+const userService = new UserService(userDao);
+const userController = new UserController(userService, authService);
+const userValidator = new UserValidator(userService);
+
 // Routers
-const userRouter = makeUserRouter(csrfProtection, authService, userService, userValidator);
+const userRouter = makeUserRouter(csrfProtection, authService, userController, userValidator);
 
 
 
-app.use(limiter);
+// TODO: app.use(limiter);
 app.use(userRouter);
 
-// TODO: Check if removing expired tokens works
 // Delete all expired refresh tokens
 const interval = setInterval(() => {
-    authService.deleteAllRefreshTokens({ expireDate: {$lt: new Date()} })
+    console.log("Deleting expired tokens")
+    authService.deleteExpiredTokens()
 }, 60 * 60 * 1000);
-authService.deleteAllRefreshTokens( { expireDate: { $lt: new Date() }});
+authService.deleteExpiredTokens();
 
 // Clear the interval when the server is stopped
 process.on('SIGINT', () => {
@@ -114,8 +115,24 @@ app.use((error, req, res, next) => {
         case 'ValidationError':
             return res.status(code).json({ error: error });
         case 'AuthenticationError':
+            if (error.type === 2) {
+                res.clearCookie('_csrf');
+                res.clearCookie('refreshToken');
+                res.clearCookie('refreshTokenFingerprint');
+                res.clearCookie('accessTokenFingerprint');
+                
+                return res.redirect(`/login?${new URLSearchParams(error)}`)
+            }
             return res.status(code).json({ error: error });
         case 'TokenExpiredError':
+            if (error.type === 2) {
+                res.clearCookie('_csrf');
+                res.clearCookie('refreshToken');
+                res.clearCookie('refreshTokenFingerprint');
+                res.clearCookie('accessTokenFingerprint');
+
+                return res.redirect(`/login?${new URLSearchParams(error)}`)
+            }
             return res.status(code).json({ error: error });
         case 'JsonWebTokenError':
             return res.status(code).json({ error: error });

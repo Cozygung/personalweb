@@ -6,6 +6,7 @@ let csrf = '';
 
 const setToken = (newToken) => {
     token = newToken;
+    console.log(token)
 };
 
 const setCSRFToken = (newToken) => {
@@ -21,7 +22,11 @@ const instance = axios.create({
     headers: {
         'Content-Type': 'application/json'
     },
-    withCredentials: true
+    withCredentials: true,
+    validateStatus: (status) => {
+        // Accept all 2xx and 3xx status codes (when redirecting)
+        return status >= 200 && status < 400;
+    }
 });
 
 // Request interceptor
@@ -37,10 +42,8 @@ instance.interceptors.request.use(
             console.log(csrf)
         }
         
-        // TODO: We only need to send in deviceId on every request (In the header)
-        // TODO: Send Full device info only on login + logout (In the body)
-        config.headers['device'] = JSON.stringify(getUserDeviceInfo());
-        console.log(config.headers['device'])
+        // We only need to send in deviceId on every request (In the header)
+        config.headers['deviceId'] = JSON.stringify(getUserDeviceInfo()._id);
         
         return config;
     },
@@ -91,7 +94,11 @@ instance.interceptors.response.use(
 
 async function refreshToken() {
     console.log('Refreshing Token')
-    const res = await instance.post('/token', {}, {
+    const payload = {
+        device: getUserDeviceInfo()
+    };
+    
+    const res = await instance.post('/token', JSON.stringify(payload), {
         withCredentials: true
     }).catch(error => {
         console.log(error)
@@ -112,5 +119,6 @@ async function refreshToken() {
 
 instance.setToken = setToken;
 instance.setCSRFToken = setCSRFToken;
+instance.refreshToken = refreshToken;
 
 export default instance;

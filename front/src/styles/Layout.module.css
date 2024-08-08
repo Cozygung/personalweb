@@ -1,0 +1,22 @@
+.layout {
+    display: flex;
+    flex-direction: column;
+    height: 100vh; /* Full height layout */
+}
+
+.content {
+    display: flex;
+    flex: 1; /* Take up remaining space */
+}
+
+.main {
+    flex: 1; /* Main content takes up available space */
+    padding: 20px;
+}
+
+.header {
+    background: #4CAF50;
+    color: white;
+    padding: 20px;
+    text-align: center;
+}

@@ -1,20 +1,26 @@
 import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
 
-import Dashboard from './components/Dashboard';
-import Home from './components/Home'
+import Dashboard from './pages/Dashboard';
+import Home from './pages/Home'
+import { AuthProvider } from './store/AuthContext'
+import Login from "./pages/Login";
+import About from "./pages/About";
 
 // TODO: Add LoginPage
-function App() {
+const App = () => {
 
-
-  return (
-      <Router>
-        <Routes>
-          <Route exact path="/" element={<Home />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-        </Routes>
-      </Router>
-  );
+    return (
+        <AuthProvider>
+            <Router>
+                <Routes>
+                    <Route exact path="/" element={ <Home/> } />
+                    <Route path="/dashboard" element={ <Dashboard/> } />
+                    <Route path="/login" element={ <Login/> } />
+                    <Route path="/about" element={ <About/> } />
+                </Routes>
+            </Router>
+        </AuthProvider>
+    );
 }
 
 export default App;

@@ -1,0 +1,56 @@
+.dashboardPage {
+    font-family: Arial, sans-serif;
+    line-height: 1.6;
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+.dashboardPage * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/* Main Content Styles */
+.mainContent {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); /* Flexible grid */
+    gap: 15px; /* Space between cards */
+    padding: 20px;
+}
+
+/* Card Styles */
+.card {
+    background: #f4f4f4;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    padding: 15px;
+    text-align: center;
+}
+
+/* Media Queries for Responsive Design */
+@media (max-width: 768px) {
+    .navList li {
+        display: block; /* Stack navigation items vertically on smaller screens */
+        margin: 10px 0;
+    }
+
+    .header {
+        padding: 10px;
+    }
+
+    .mainContent {
+        grid-template-columns: 1fr; /* Stack cards in a single column */
+    }
+}
+
+@media (max-width: 480px) {
+    .header {
+        padding: 5px;
+    }
+
+    .footer {
+        font-size: 0.9em; /* Smaller footer text on very small screens */
+    }
+}

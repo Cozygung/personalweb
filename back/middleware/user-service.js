@@ -16,14 +16,15 @@ class UserService {
 
     async createUser(user) {
         user.password = await bcrypt.hash(user.password, 12);
-        const userInstance = await this.#userDAO.createUser(user).catch((error) => {
-            console.log("Create User Error: ", error);
-            if (error.code === 11000) {
-                throw new ConflictError('This username is taken! Pick another username');
-            } else {
-                throw new ServerError(error.message);
-            }
-        })
+        const userInstance = await this.#userDAO.createUser(user)
+            .catch((error) => {
+                console.log("Create User Error: ", error);
+                if (error.code === 11000) {
+                    throw new ConflictError('This username is taken! Pick another username');
+                } else {
+                    throw new ServerError(error.message);
+                }
+            })
         console.log('User created ' + userInstance);
         
         return userInstance
@@ -61,7 +62,6 @@ class UserService {
         }
         
         return deletedUser;
-        // TODO: await Course.deleteMany({teachers: {$elemMatch: {_id: userId}}});
     }
     
     /**

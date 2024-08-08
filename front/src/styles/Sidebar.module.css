@@ -1,0 +1,19 @@
+.sidebar {
+    width: 200px; /* Fixed width for the sidebar */
+    background: #f4f4f4;
+    padding: 20px;
+}
+
+.navList {
+    list-style-type: none;
+    padding: 0;
+}
+
+.navList li {
+    margin: 10px 0;
+}
+
+.navList a {
+    text-decoration: none;
+    color: #333;
+}

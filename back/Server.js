@@ -76,7 +76,7 @@ const limiter = rateLimit({
 const userModel = makeUserModel(mongoose);
 const userDao = new UserDao(userModel);
 const userService = new UserService(userDao);
-const userController = new UserController(userService, authService);
+const userController = new UserController(mongoose, userService, authService);
 const userValidator = new UserValidator(userService);
 
 // Routers

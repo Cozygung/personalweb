@@ -13,9 +13,10 @@ class UserController {
     #userService;
     #authService;
 
-    constructor(userService, authService) {
+    constructor(mongoose, userService, authService) {
         this.#userService = userService;
         this.#authService = authService;
+        this.mongoose = mongoose;
     }
     
     getUserList = async (req, res, next) => {
@@ -25,7 +26,7 @@ class UserController {
 
             return res.status(StatusCodes.OK).json({ users: users });
         } catch (error) {
-            next(error);
+            return next(error);
         }
     }
     
@@ -45,7 +46,7 @@ class UserController {
 
             return res.status(StatusCodes.OK).json({ user: user });
         } catch (error) {
-            next(error);
+            return next(error);
         }
     }
     
@@ -68,7 +69,7 @@ class UserController {
 
             return res.status(StatusCodes.OK).json({ user: updatedUser });
         } catch (error) {
-            next(error);
+            return next(error);
         }
     }
     
@@ -86,7 +87,7 @@ class UserController {
 
             return res.sendStatus(StatusCodes.OK);
         } catch (error) {
-            next(error);
+            return next(error);
         }
     }
     
@@ -103,59 +104,64 @@ class UserController {
 
             return res.status(StatusCodes.CREATED).json({ user: newUser });
         } catch (error){
-            next(error);
+            return next(error);
         }
     }
     
     login = async (req, res, next) => {
+        const session = await this.mongoose.startSession();
+        session.startTransaction();
+        
         try {
-            const userDevice = JSON.parse(req.headers.device);
+            const userDevice = req.body.device;
             userDevice._id = new ObjectId(userDevice._id);
             
-            // TODO: Make this atomic (Transactions)
             const existingUser = await this.#userService.getUser({ username: req.body.username });
-            
-            if (existingUser && await bcrypt.compare(req.body.password, existingUser.password)) {
-                const {accessToken, accessTokenFingerprint} 
-                    = await this.#authService.createAccessToken(existingUser);
-                const {refreshToken, refreshTokenFingerprint, refreshTokenExpireDate, deviceId} 
-                    = await this.#authService.createRefreshToken(existingUser, userDevice);
-
-                // TODO: replace ipAddress with req.ip
-                const ipAddress = '103.241.36.64'
-                const ipInfo = await this.#authService.getIPInfo(ipAddress);
-                
-                const loginInstance = {
-                    ipAddress: ipAddress,
-                    action: 'LOGIN',
-                    deviceId: deviceId,
-                    location: {
-                        city: ipInfo.city,
-                        country: ipInfo.country,
-                        latitude: ipInfo.lat,
-                        longitude: ipInfo.lon
-                    },
-                };
-                await this.#authService.addLoginInstance(existingUser._id, loginInstance)
-                
-                const cookieOptions = {
-                    httpOnly: true,
-                    secure: true,
-                    signed: true,
-                    sameSite: 'strict',
-                    maxAge: refreshTokenExpireDate.getTime() - Date.now()
-                };
-                res.cookie('refreshToken', refreshToken, cookieOptions);
-                res.cookie('refreshTokenFingerprint', refreshTokenFingerprint, cookieOptions);
-                res.cookie('accessTokenFingerprint', accessTokenFingerprint,
-                    {...cookieOptions, maxAge: parseInt(process.env.JWT_ACCESS_TOKEN_EXPIRE_TIME, 10) * 1000});
-                return res.status(StatusCodes.OK).json({ accessToken: accessToken, deviceId: deviceId.toString() });
-            } else {
-                next( new AuthenticationError('Invalid credentials', 0) );
+            if (!existingUser || !await bcrypt.compare(req.body.password, existingUser.password)) {
+                throw new AuthenticationError('Invalid credentials', 0);
             }
+            
+            const {accessToken, accessTokenFingerprint} 
+                = await this.#authService.createAccessToken(existingUser);
+            const {refreshToken, refreshTokenFingerprint, refreshTokenExpireDate, deviceId} 
+                = await this.#authService.createRefreshToken(existingUser, userDevice);
 
+            // TODO: replace ipAddress with req.ip
+            const ipAddress = '103.241.36.64'
+            const ipInfo = await this.#authService.getIPInfo(ipAddress);
+            
+            const loginInstance = {
+                ipAddress: ipAddress,
+                action: 'LOGIN',
+                deviceId: deviceId,
+                location: {
+                    city: ipInfo.city,
+                    country: ipInfo.country,
+                    latitude: ipInfo.lat,
+                    longitude: ipInfo.lon
+                },
+            };
+            await this.#authService.addLoginInstance(existingUser._id, loginInstance)
+            
+            const cookieOptions = {
+                httpOnly: true,
+                secure: true,
+                signed: true,
+                sameSite: 'strict',
+                maxAge: refreshTokenExpireDate.getTime() - Date.now()
+            };
+            res.cookie('refreshToken', refreshToken, cookieOptions);
+            res.cookie('refreshTokenFingerprint', refreshTokenFingerprint, cookieOptions);
+            res.cookie('accessTokenFingerprint', accessTokenFingerprint,
+                {...cookieOptions, maxAge: parseInt(process.env.JWT_ACCESS_TOKEN_EXPIRE_TIME, 10) * 1000});
+
+            await session.commitTransaction();
+            return res.status(StatusCodes.OK).json({ accessToken: accessToken, deviceId: deviceId.toString() });
         } catch (error) {
-            next(error);
+            await session.abortTransaction();
+            return next(error);
+        } finally {
+            await session.endSession();
         }
     }
     
@@ -163,7 +169,7 @@ class UserController {
         try {
             const encryptedRefreshToken = req.signedCookies.refreshToken;
             const fingerprint = req.signedCookies.refreshTokenFingerprint;
-            const userDevice = JSON.parse(req.headers.device);
+            const userDevice = req.body.device;
             userDevice._id = new ObjectId(userDevice._id);
 
             const {accessToken, accessTokenFingerprint, deviceId, userId} = 
@@ -197,27 +203,41 @@ class UserController {
             
             return res.status(StatusCodes.OK).json({ accessToken: accessToken, deviceId: deviceId});
         } catch(error) {
-            next(error);
+            return next(error);
         }
     }
     
     logout = async (req, res, next) => {
+        const session = await this.mongoose.startSession();
+        session.startTransaction();
+        
         try {
             const userId = new ObjectId(req.user._id);
-            const userDevice = JSON.parse(req.headers.device);
+            const userDevice = req.body.device;
             const deviceId = new ObjectId(userDevice._id)
-            console.log(deviceId)
             
-            await this.#authService.logoutDevice(userId, deviceId);
+            // Remove the device
+            const updatedToken = await this.#authService.removeDevice(userId, deviceId,
+                { returnDocument: 'after', session } // Use the session for transaction
+            );
+
+            // Check if devices list is empty
+            if (updatedToken && updatedToken.devices.length === 0) {
+                await this.#authService.deleteRefreshToken({ userId: userId }, { session })
+            }
 
             res.clearCookie('_csrf');
             res.clearCookie('refreshToken');
             res.clearCookie('refreshTokenFingerprint');
             res.clearCookie('accessTokenFingerprint');
 
+            await session.commitTransaction();
             return res.sendStatus(StatusCodes.OK);
         } catch (error) {
-            next(error);
+            await session.abortTransaction();
+            return next(error);
+        } finally {
+            await session.endSession();
         }
     }
     
@@ -232,27 +252,27 @@ class UserController {
 
             return res.sendStatus(StatusCodes.OK);
         } catch (error) {
-            next(error);
+            return next(error);
         }
     }
     
     deleteAllTokens = async (req, res, next) => {
         try {
             const { revocationDate } = req.query;
-            await this.#authService.deleteAllRefreshTokens({ creationDate: { $lt: revocationDate } })
+            await this.#authService.deleteAllRefreshTokensCreatedBeforeDate(revocationDate)
 
         } catch (error) {
-            next(error);
+            return next(error);
         }
     }
     
     test = async (req, res, next) => {
-        res.set('Location', '/login');
-        return res.status(StatusCodes.MOVED_TEMPORARILY).end(); // json({ redirect: '/login' });
+        // TODO: .render()
+        return res.status(StatusCodes.MOVED_TEMPORARILY).json({ redirect: '/login' });
     }
     
     redirected = async (req, res, next) => {
-        console.log(req)
+        console.log("TEST")
         console.log(res)
         return res.status(StatusCodes.OK).send("Redirected");
     }

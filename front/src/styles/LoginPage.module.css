@@ -1,0 +1,30 @@
+.loginPage {
+    font-family: Arial, sans-serif;
+    line-height: 1.6;
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+.loginPage * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/* Main Content Styles */
+.mainContent {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); /* Flexible grid */
+    gap: 15px; /* Space between cards */
+    padding: 20px;
+}
+
+/* Card Styles */
+.card {
+    background: #f4f4f4;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    padding: 15px;
+    text-align: center;
+}

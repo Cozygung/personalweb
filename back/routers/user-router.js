@@ -1,6 +1,5 @@
 import express from 'express';
 
-// TODO: Add return before all next()
 // TODO: Add Versioning to API endpoints
 const makeRouter = (csrfProtection, authService, userController, userValidator) => {
     const userRouter = express.Router();
@@ -59,15 +58,14 @@ const makeRouter = (csrfProtection, authService, userController, userValidator) 
      * @returns accessToken
      * @returns refreshToken
      * */
-    userRouter.post('/login', userController.login);
+    userRouter.post('/login', csrfProtection, userController.login);
 
     /**
      * GET - CSRF Token
      * Retrieves CSRF token for the session
-     * Permissions: User must be logged in to retrieve a session token
      * @returns csrfToken
      * */
-    userRouter.get('/form', authService.isStudent, csrfProtection, async (req, res, next) => {
+    userRouter.get('/form', csrfProtection, async (req, res, next) => {
         res.json({ csrfToken: req.csrfToken() });
     })
 
@@ -78,7 +76,7 @@ const makeRouter = (csrfProtection, authService, userController, userValidator) 
      * @param refreshToken
      * @returns accessToken
      * */
-    userRouter.post('/token', userController.refreshToken);
+    userRouter.post('/token', csrfProtection, userController.refreshToken);
     
     /**
      * POST - Logout
@@ -102,7 +100,7 @@ const makeRouter = (csrfProtection, authService, userController, userValidator) 
 
     userRouter.get('/test', userController.test)
 
-    userRouter.get('/login', userController.redirected);
+    userRouter.get('/redirected', userController.redirected);
     
     
     

@@ -37,7 +37,7 @@ const Home = () => {
                 }
             });
         // Not using localstorage for accessToken. Security is more important & we don't need it to persist across tabs
-        login(res.data.accessToken);
+        await login(res.data.accessToken);
         if (res.data.deviceId) {
             localStorage.setItem('deviceId', res.data.deviceId)
         }
@@ -54,7 +54,7 @@ const Home = () => {
             });
         
         localStorage.clear();
-        logout();
+        await logout();
         console.log(res);
         
         // TODO: Redirect the user to home page
@@ -72,6 +72,24 @@ const Home = () => {
         }
 
         // TODO: Redirect the user to home page
+    }
+    
+    async function busWalk() {
+        const res = await axiosInstance.post('/v1/walk-paths', {}, {timeout: 0})
+            .catch(error => {
+                console.log(error)
+            });
+        
+        console.log(res);
+    }
+
+    async function busRoute() {
+        const res = await axiosInstance.post('/v1/bus-routes', {}, {timeout: 0})
+            .catch(error => {
+                console.log(error)
+            });
+        
+        console.log(res)
     }
 
     async function createUser() {
@@ -135,6 +153,8 @@ const Home = () => {
                 <button onClick={handleLogin}>login</button>
                 <button onClick={handleLogout}>logout</button>
                 <button onClick={test}>test</button>
+                <button onClick={busWalk}>busWalk</button>
+                <button onClick={busRoute}>busRoutes</button>
             </header>
         </div>
     );

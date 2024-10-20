@@ -96,7 +96,7 @@ const makeRouter = (csrfProtection, authService, userController, userValidator) 
      * @param accessToken
      * @param csrfToken
      * */
-    userRouter.delete('/tokens', authService.isAdmin, csrfProtection, userController.deleteAllTokens)
+    userRouter.delete('/token', authService.isAdmin, csrfProtection, userController.deleteAllTokens)
 
     userRouter.get('/test', userController.test)
 

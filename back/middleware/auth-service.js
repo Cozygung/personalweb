@@ -9,6 +9,7 @@ import {AuthenticationError} from '../errors/authentication-error.js';
 import {JsonWebTokenError} from "../errors/jwt-error.js";
 import {ConflictError} from "../errors/conflict-error.js";
 
+// TODO: If user spams refresh tab, it will spam refresh Token requests 
 class AuthService {
     #tokenDAO;
     

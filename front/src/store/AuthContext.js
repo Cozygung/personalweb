@@ -6,7 +6,8 @@ const AuthContext = createContext();
 // TODO: Consider using a state management library (like Redux, MobX, or Context API) for global state.
 export const AuthProvider = ({ children }) => {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
-
+    
+    // TODO: Components should handle redirects when user is not authenticated
     useEffect(() => {
         const reauthenticateUser = async () => {
             try {
@@ -14,26 +15,32 @@ export const AuthProvider = ({ children }) => {
                 axiosInstance.setCSRFToken(csrf.data.csrfToken);
                 
                 const accessToken = await axiosInstance.refreshToken();
-                login(accessToken);
+                await login(accessToken);
             } catch (error) {
                 console.error('Error authenticating:', error);
             }
         };
         
-        if (!isAuthenticated) {
-            reauthenticateUser();
-        }
-    }, [isAuthenticated]);
+        reauthenticateUser();
+        
+    }, []);
     
-    const login = (token) => {
+    const login = async (token) => {
         axiosInstance.setToken(token);
         setIsAuthenticated(true);
-        console.log(isAuthenticated)
+
+        // Set new CSRF token when User logs into a new session
+        const csrf = await axiosInstance.get('http://localhost:3000/form');
+        axiosInstance.setCSRFToken(csrf.data.csrfToken);
     };
 
-    const logout = () => {
+    const logout = async () => {
         axiosInstance.setToken(null); // Clear the access token
         setIsAuthenticated(false); // Update authentication state
+
+        // Set new CSRF token when User logs out
+        const csrf = await axiosInstance.get('http://localhost:3000/form');
+        axiosInstance.setCSRFToken(csrf.data.csrfToken);
     };
 
     return (

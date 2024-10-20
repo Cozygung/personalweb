@@ -76,6 +76,13 @@ instance.interceptors.response.use(
                     return instance.request(error.config);
                 } catch (refreshError) {
                     // Handle refresh token failure
+                    const { code, message, name } = refreshError.response.data.error;
+                    const type = refreshError.response.data.error.type ?? undefined;
+
+                    if (name === 'AuthenticationError' && type === 2 || name === 'TokenExpiredError' && type === 2) {
+                        setToken('');
+                    }
+                    
                     console.error('Failed to refresh token:', refreshError.response.data)
                     // Redirect to login page or handle unauthorized error
                     // Example: window.location.href = '/login';
@@ -97,24 +104,17 @@ async function refreshToken() {
     const payload = {
         device: getUserDeviceInfo()
     };
-    
+
     const res = await instance.post('/token', JSON.stringify(payload), {
         withCredentials: true
-    }).catch(error => {
-        console.log(error)
-        
-        const { code, message, name } = error.response.data.error;
-        const type = error.response.data.error.type ?? undefined;
-        
-        if (name === 'AuthenticationError' && type === 2 || name === 'TokenExpiredError' && type === 2) {
-            setToken('');
-        }
-    });
+    })
+
     if (res.data.deviceId) {
         localStorage.setItem('deviceId', res.data.deviceId);
     }
-    
+
     return res.data.accessToken;
+        
 }
 
 instance.setToken = setToken;

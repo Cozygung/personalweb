@@ -1,7 +1,11 @@
 import * as dotenv from 'dotenv';
 import express from 'express';
 import { Mongoose } from 'mongoose';
+import neo4j from "neo4j-driver";
+
 import {StatusCodes} from 'http-status-codes';
+import {ServerError} from './errors/server-error.js';
+import {NotFoundError} from './errors/not-found-error.js';
 
 // Security
 import cors from 'cors';
@@ -14,17 +18,20 @@ import MongoStore from 'rate-limit-mongo';
 import AuthService from './middleware/auth-service.js';
 
 import makeUserModel from './models/user-model.js';
-import makeRefreshTokenModel from './models/token-model.js';
+import UserValidator from './middleware/validator/user-validator.js';
 import UserDao from './dao/user-dao.js';
-import TokenDao from './dao/token-dao.js';
 import UserService from './middleware/user-service.js';
+import UserController from "./controllers/user-controller.js";
+
+import makeRefreshTokenModel from './models/token-model.js';
+import TokenDao from './dao/token-dao.js';
+
+import BusService from "./middleware/bus-service.js";
+import BusController from "./controllers/bus-controller.js";
 
 // Routers
 import makeUserRouter from './routers/user-router.js';
-import UserValidator from './middleware/validator/user-validator.js';
-import {ServerError} from './errors/server-error.js';
-import {NotFoundError} from './errors/not-found-error.js';
-import UserController from "./controllers/user-controller.js";
+import makeBusRouter from './routers/bus-router.js';
 
 // Load Environment Variables from .env.production
 dotenv.config({path: `config/.env.${process.env.NODE_ENV}`});
@@ -79,13 +86,20 @@ const userService = new UserService(userDao);
 const userController = new UserController(mongoose, userService, authService);
 const userValidator = new UserValidator(userService);
 
+// Bus Middleware
+const neo4jDriver = neo4j.driver(process.env.NEO4J_URL_LOCALHOST, neo4j.auth.basic(process.env.NEO4J_USERNAME, process.env.NEO4J_PASSWORD));
+const busService = new BusService();
+const busController = new BusController(neo4jDriver, busService);
+
 // Routers
 const userRouter = makeUserRouter(csrfProtection, authService, userController, userValidator);
+const busRouter = makeBusRouter(csrfProtection, busController);
 
 
 
 // TODO: app.use(limiter);
 app.use(userRouter);
+app.use(busRouter);
 
 // Delete all expired refresh tokens
 const interval = setInterval(() => {
@@ -116,22 +130,16 @@ app.use((error, req, res, next) => {
             return res.status(code).json({ error: error });
         case 'AuthenticationError':
             if (error.type === 2) {
-                res.clearCookie('_csrf');
                 res.clearCookie('refreshToken');
                 res.clearCookie('refreshTokenFingerprint');
                 res.clearCookie('accessTokenFingerprint');
-                
-                return res.redirect(`/login?${new URLSearchParams(error)}`)
             }
             return res.status(code).json({ error: error });
         case 'TokenExpiredError':
             if (error.type === 2) {
-                res.clearCookie('_csrf');
                 res.clearCookie('refreshToken');
                 res.clearCookie('refreshTokenFingerprint');
                 res.clearCookie('accessTokenFingerprint');
-
-                return res.redirect(`/login?${new URLSearchParams(error)}`)
             }
             return res.status(code).json({ error: error });
         case 'JsonWebTokenError':
